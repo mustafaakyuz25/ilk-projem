@@ -240,15 +240,7 @@ io.on('connection', (socket) => {
       });
       
       console.log(`✅ Partner found event'leri gönderildi`);
-      
-      // 5 dakika timer başlat
-      const chatTimer = setTimeout(() => {
-        endRandomChat(chatId, 'time_expired');
-      }, 5 * 60 * 1000); // 5 dakika
-      
-      activeChats.get(chatId).timer = chatTimer;
-      
-      console.log(`⏰ 5 dakika timer başlatıldı`);
+      console.log(`💬 Sınırsız sohbet başladı!`);
     } else {
       // Bekleyen listesine ekle
       waitingUsers.add(socket.id);
