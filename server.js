@@ -31,6 +31,11 @@ const PORT = process.env.PORT || 3000;
 const rooms = new Map(); // roomId -> { name, link, createat, members: Set }
 const users = new Map(); // socketId -> { userId, username, color, roomId }
 
+// Random Chat için yeni veri yapıları
+const waitingUsers = new Set(); // Bekleyen kullanıcılar
+const activeChats = new Map(); // chatId -> { user1: socketId, user2: socketId, startTime, timer }
+const randomUsers = new Map(); // socketId -> { username, chatId }
+
 // Ana route
 app.get('/', (req, res) => {
   res.json({ 
@@ -187,10 +192,109 @@ io.on('connection', (socket) => {
     }
   });
 
+  // Random Chat - Partner Arama
+  socket.on('find_random_partner', (data) => {
+    const { username } = data;
+    console.log(`Random partner arıyor: ${username} (${socket.id})`);
+    
+    // Kullanıcıyı kaydet
+    randomUsers.set(socket.id, { username });
+    
+    // Bekleyen kullanıcı var mı kontrol et
+    if (waitingUsers.size > 0) {
+      // İlk bekleyen kullanıcıyı al
+      const partnerId = waitingUsers.values().next().value;
+      waitingUsers.delete(partnerId);
+      
+      // Chat oluştur
+      const chatId = uuidv4();
+      const partnerData = randomUsers.get(partnerId);
+      
+      activeChats.set(chatId, {
+        user1: socket.id,
+        user2: partnerId,
+        startTime: Date.now(),
+        timer: null
+      });
+      
+      // Her iki kullanıcıya da partner bulundu bilgisini gönder
+      socket.emit('partner_found', {
+        chat_id: chatId,
+        partner_name: partnerData.username
+      });
+      
+      io.to(partnerId).emit('partner_found', {
+        chat_id: chatId,
+        partner_name: username
+      });
+      
+      // 5 dakika timer başlat
+      const chatTimer = setTimeout(() => {
+        endRandomChat(chatId, 'time_expired');
+      }, 5 * 60 * 1000); // 5 dakika
+      
+      activeChats.get(chatId).timer = chatTimer;
+      
+      console.log(`Random chat başladı: ${username} <-> ${partnerData.username}`);
+    } else {
+      // Bekleyen listesine ekle
+      waitingUsers.add(socket.id);
+      console.log(`Kullanıcı bekleme listesine eklendi: ${username}`);
+    }
+  });
+
+  // Random Chat - Mesaj Gönderme
+  socket.on('send_random_message', (data) => {
+    const { chat_id, message, sender } = data;
+    const chat = activeChats.get(chat_id);
+    
+    if (chat) {
+      // Partner'ı bul ve mesajı gönder
+      const partnerId = chat.user1 === socket.id ? chat.user2 : chat.user1;
+      
+      io.to(partnerId).emit('random_message_received', {
+        sender,
+        message,
+        chat_id
+      });
+      
+      console.log(`Random mesaj gönderildi: ${sender} -> ${message}`);
+    }
+  });
+
+  // Random Chat - Chat'den Ayrılma
+  socket.on('leave_random_chat', (data) => {
+    const { chat_id } = data;
+    endRandomChat(chat_id, 'user_left');
+  });
+
+  // Random Chat bitiş fonksiyonu
+  function endRandomChat(chatId, reason) {
+    const chat = activeChats.get(chatId);
+    if (chat) {
+      // Timer'ı temizle
+      if (chat.timer) {
+        clearTimeout(chat.timer);
+      }
+      
+      // Her iki kullanıcıya da chat bittiğini bildir
+      const eventName = reason === 'time_expired' ? 'chat_time_expired' : 'partner_disconnected';
+      
+      io.to(chat.user1).emit(eventName, { chat_id: chatId });
+      io.to(chat.user2).emit(eventName, { chat_id: chatId });
+      
+      // Chat'i sil
+      activeChats.delete(chatId);
+      
+      console.log(`Random chat sona erdi: ${chatId} (${reason})`);
+    }
+  }
+
   // Bağlantı koptuğunda
   socket.on('disconnect', () => {
     console.log(`Kullanıcı ayrıldı: ${socket.id}`);
     
+    // Normal room sistemini temizle
     const user = users.get(socket.id);
     if (user && user.roomId) {
       const room = rooms.get(user.roomId);
@@ -203,6 +307,21 @@ io.on('connection', (socket) => {
           console.log(`Boş oda silindi: ${user.roomId}`);
         }
       }
+    }
+    
+    // Random chat sistemini temizle
+    waitingUsers.delete(socket.id);
+    
+    const randomUser = randomUsers.get(socket.id);
+    if (randomUser) {
+      // Aktif chat var mı kontrol et
+      for (const [chatId, chat] of activeChats.entries()) {
+        if (chat.user1 === socket.id || chat.user2 === socket.id) {
+          endRandomChat(chatId, 'user_disconnected');
+          break;
+        }
+      }
+      randomUsers.delete(socket.id);
     }
     
     users.delete(socket.id);
