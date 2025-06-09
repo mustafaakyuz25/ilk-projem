@@ -52,11 +52,16 @@ app.get('/health', (req, res) => {
 
 // Socket.IO bağlantı yönetimi
 io.on('connection', (socket) => {
-  console.log(`Yeni kullanıcı bağlandı: ${socket.id}`);
+  console.log(`🔗 Yeni kullanıcı bağlandı: ${socket.id}`);
   
   // Kullanıcıya unique ID gönder
   const userId = uuidv4();
   socket.emit('USERID', userId);
+  
+  // Debug: Tüm gelen event'leri logla
+  socket.onAny((eventName, ...args) => {
+    console.log(`📡 Event alındı: ${eventName}`, args);
+  });
   
   // Kullanıcı ID'sini kaydet
   socket.on('ID', (id) => {
@@ -194,13 +199,17 @@ io.on('connection', (socket) => {
 
   // Random Chat - Partner Arama
   socket.on('find_random_partner', (data) => {
+    console.log(`🎯 RANDOM CHAT EVENT ALINDI:`, data);
     const { username } = data;
-    console.log(`Random partner arıyor: ${username} (${socket.id})`);
+    console.log(`🔍 Random partner arıyor: ${username} (${socket.id})`);
     
     // Kullanıcıyı kaydet
     randomUsers.set(socket.id, { username });
+    console.log(`📝 Kullanıcı kaydedildi: ${username}`);
     
     // Bekleyen kullanıcı var mı kontrol et
+    console.log(`👥 Bekleyen kullanıcı sayısı: ${waitingUsers.size}`);
+    
     if (waitingUsers.size > 0) {
       // İlk bekleyen kullanıcıyı al
       const partnerId = waitingUsers.values().next().value;
@@ -209,6 +218,8 @@ io.on('connection', (socket) => {
       // Chat oluştur
       const chatId = uuidv4();
       const partnerData = randomUsers.get(partnerId);
+      
+      console.log(`🎉 ESLESTİRİLDİ: ${username} <-> ${partnerData.username}`);
       
       activeChats.set(chatId, {
         user1: socket.id,
@@ -228,6 +239,8 @@ io.on('connection', (socket) => {
         partner_name: username
       });
       
+      console.log(`✅ Partner found event'leri gönderildi`);
+      
       // 5 dakika timer başlat
       const chatTimer = setTimeout(() => {
         endRandomChat(chatId, 'time_expired');
@@ -235,11 +248,11 @@ io.on('connection', (socket) => {
       
       activeChats.get(chatId).timer = chatTimer;
       
-      console.log(`Random chat başladı: ${username} <-> ${partnerData.username}`);
+      console.log(`⏰ 5 dakika timer başlatıldı`);
     } else {
       // Bekleyen listesine ekle
       waitingUsers.add(socket.id);
-      console.log(`Kullanıcı bekleme listesine eklendi: ${username}`);
+      console.log(`⏳ Kullanıcı bekleme listesine eklendi: ${username} (Toplam bekleyen: ${waitingUsers.size})`);
     }
   });
 
